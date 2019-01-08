@@ -1,0 +1,99 @@
+#!/usr/bin/env node
+
+const argv = require('argv');
+const fs = require('fs');
+const sizeOf = require('image-size');
+const mkdirp = require('mkdirp');
+const isImage = require('is-image');
+const sharp = require('sharp');
+const path = require('path');
+const settings = require('./settings');
+
+const channels = Object.keys(settings);
+const { options = '' } = argv.option({
+    name: 'dir',
+    short: 'd',
+    type: 'string',
+    description: '圖檔位置',
+    required: true,
+    example: "'./resize --dir path' or './resize -d path'"
+}).run();
+const { dir } = options;
+
+if (!dir) {
+    argv.help();
+    process.exit(1);
+}
+
+
+channels.forEach(channel => {
+    mkdirp(`${ dir }/${ channel }`);
+});
+
+(new Promise((resolve, reject) => {
+    fs.readdir(dir, (err, files) => {
+        if (err) {
+            reject(err);
+        }
+
+        resolve(files);
+    })
+})).then(files => {
+
+    files.forEach(file => {
+        const fullPath = `${ dir }/${ file }`;
+        const extname = path.extname(fullPath);
+        const basename = path.basename(fullPath, extname);
+
+        if (isImage(fullPath)) {
+            const dimensions = sizeOf(fullPath);
+
+            channels.forEach(channel => {
+                const fileFormat = settings[channel];
+
+                fileFormat.forEach(format => {
+                    const width = format.width;
+                    const ratio = width / dimensions.width;
+                    const height = Math.ceil(
+                        !format.height ?
+                        (dimensions.height * ratio)
+                        : format.height
+                    );
+                    const roundedCorners = Buffer.from(
+                        `<svg>
+                            <rect fill="#ffffff" x="0" y="0" width="${ width - 10 }" height="${ height - 10 }"/>
+                        </svg>`
+                    );
+                    let imageName = '';
+
+                    if (format.height) {
+                        imageName = `${ basename }-${ format.width }x${ format.height }${ extname }`;
+                    }
+                    else {
+                        imageName = `${ basename }-w${ format.width }${ extname }`;
+                    }
+
+                    const resizeName = `${ dir }/${ channel }/${ imageName }`;
+
+                    sharp(fullPath)
+                        .resize(width, height)
+                        // .overlayWith(roundedCorners, {
+                        //     cutout: true,
+                        //     create: {
+                        //         width: width - 10,
+                        //         height: height - 10,
+                        //         channels: 4,
+                        //         background: '#fff',
+                        //     }
+                        // })
+                        .toFile(resizeName, (err, info) => {
+                            console.log(err, info);
+                        });
+                })
+            });
+        }
+    });
+}).catch(err => {
+    console.error(err);
+    process.exit(1);
+});
